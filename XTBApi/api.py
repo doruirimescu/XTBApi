@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 
 from websocket import create_connection
-from websocket._exceptions import WebSocketConnectionClosedException
+from websocket._exceptions import WebSocketConnectionClosedException, WebSocketAddressException
 
 from XTBApi.exceptions import *
 
@@ -113,11 +113,11 @@ class BaseClient(object):
             return func(*args, **kwargs)
         except SocketError as e:
             LOGGER.info("re-logging in due to LOGIN_TIMEOUT gone")
-            self.login(self._login_data[0], self._login_data[1])
+            self.login(self._login_data[0], self._login_data[1], self._login_data[2])
             return func(*args, **kwargs)
         except Exception as e:
             LOGGER.warning(e)
-            self.login(self._login_data[0], self._login_data[1])
+            self.login(self._login_data[0], self._login_data[1], self._login_data[2])
             return func(*args, **kwargs)
 
     def _send_command(self, dict_data):
@@ -136,7 +136,7 @@ class BaseClient(object):
         if res['status'] is False:
             raise CommandFailed(res)
         if 'returnData' in res.keys():
-            self.LOGGER.info("CMD: done")
+            self.LOGGER.debug("CMD: done")
             self.LOGGER.debug(res['returnData'])
             return res['returnData']
 
@@ -147,9 +147,13 @@ class BaseClient(object):
     def login(self, user_id, password, mode='demo'):
         """login command"""
         data = _get_data("login", userId=user_id, password=password)
-        self.ws = create_connection(f"wss://ws.xtb.com/{mode}")
+        try:
+            self.ws = create_connection(f"wss://ws.xtb.com/{mode}")
+        except WebSocketAddressException:
+            self.LOGGER.error("not connected - WebSocketAddressException caught")
+            raise NoInternetConnection()
         response = self._send_command(data)
-        self._login_data = (user_id, password)
+        self._login_data = (user_id, password, mode)
         self.status = STATUS.LOGGED
         self.LOGGER.info("CMD: login...")
         return response
@@ -192,7 +196,6 @@ class BaseClient(object):
         """getChartRangeRequest command"""
         if not isinstance(ticks, int):
             raise ValueError(f"ticks value {ticks} must be int")
-        self._check_login()
         args = {
             "end": end * 1000,
             "period": period,
@@ -361,6 +364,7 @@ class Transaction(object):
         self._trans_dict = trans_dict
         self.mode = {0: 'buy', 1: 'sell'}[trans_dict['cmd']]
         self.order_id = trans_dict['order']
+        self.opentrade_id = trans_dict['order2']
         self.symbol = trans_dict['symbol']
         self.volume = trans_dict['volume']
         self.price = trans_dict['close_price']
@@ -385,7 +389,12 @@ class Client(BaseClient):
         market_values = {}
         for symbol in response:
             today_values = [day for day in symbol['trading'] if day['day'] ==
-                _td.isoweekday()][0]
+                _td.isoweekday()]
+            if len(today_values) == 0: # check if day is present
+                market_values[symbol['symbol']] = False
+                continue
+            else: # time is also present
+                today_values = today_values[0]
             if today_values['fromT'] <= actual_tmsp <= today_values['toT']:
                 market_values[symbol['symbol']] = True
             else:
@@ -421,6 +430,41 @@ class Client(BaseClient):
             candle_history.append(new_candle_entry)
         LOGGER.debug(candle_history)
         return candle_history
+    
+    def get_time_to_market_open(self, list_of_symbols):
+        """get time remaining until market opens for a list of symbols"""
+        LOGGER.debug("checking time remaing till market opens")
+        _td = datetime.today()
+        actual_tmsp = _td.hour * 3600 + _td.minute * 60 + _td.second
+        response = self.get_trading_hours(list_of_symbols)
+        market_times = {}
+        for symbol in response:
+            # found day
+            oraries = {day['day']: day for day in symbol['trading']}
+            days_present = [day['day'] for day in symbol['trading']]
+            if len(days_present) == 0:
+                raise Exception("market permanently closed")
+            if _td.isoweekday() in days_present:
+                open_day = oraries[_td.isoweekday()]
+                market_times[symbol['symbol']] = 0
+            else: # find next day
+                days_to_add = 1
+                while True:
+                    day = _td.isoweekday() + days_to_add
+                    if day > 7: # reset to week start
+                        day -= 7
+                    if day not in days_present:
+                        continue # check next day
+                    else: # set days in seconds and add to market_times
+                        open_day = oraries[day]
+                        market_times[symbol['symbol']] = 60*60*24*days_to_add
+                        break
+                    days_to_add += 1
+            if open_day['fromT'] <= actual_tmsp <= open_day['toT']:
+                market_times[symbol['symbol']] += 0
+            else:
+                market_times[symbol['symbol']] += open_day['fromT'] - actual_tmsp
+        return market_times
 
     def update_trades(self):
         """update trade list"""
@@ -505,6 +549,19 @@ class Client(BaseClient):
         trade_ids = self.trade_rec.keys()
         for trade_id in trade_ids:
             self._close_trade_only(trade_id)
+
+#    def set_trailing_stop(self, order_id):
+#        """set trailing stop given an order"""
+#        trade = self.trade_rec[order_id]
+#        if trade.mode == 'buy':
+#            md = "SELL_STOP"
+#        elif trade.mode == "sell":
+#            md = "BUY_STOP"
+#        self.LOGGER.debug(f"setting a {md} loss on {order_id}")
+#        response = self.trade_transaction() #TODO: edit trade_transaction accept
+#                                           # other modes
+#        return response
+
 
 
 # - next features -
