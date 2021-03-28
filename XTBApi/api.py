@@ -164,6 +164,7 @@ class BaseClient(object):
         response = self._send_command(data)
         self.status = STATUS.LOGGED
         self.LOGGER.info("CMD: logout...")
+        self.ws.close()
         return response
 
     def get_all_symbols(self):
@@ -430,7 +431,7 @@ class Client(BaseClient):
             candle_history.append(new_candle_entry)
         LOGGER.debug(candle_history)
         return candle_history
-    
+
     def get_time_to_market_open(self, list_of_symbols):
         """get time remaining until market opens for a list of symbols"""
         LOGGER.debug("checking time remaing till market opens")
