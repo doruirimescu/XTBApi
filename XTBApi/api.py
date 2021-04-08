@@ -98,9 +98,11 @@ def _check_volume(volume):
 class BaseClient(object):
     """main client class"""
 
-    def __init__(self):
+    def __init__(self, uname, pwd, mode):
         self.ws = None
         self._login_data = None
+        self._login_data = (uname, pwd, mode)
+
         self._time_last_request = time.time() - MAX_TIME_INTERVAL
         self.status = STATUS.NOT_LOGGED
         LOGGER.debug("BaseClient inited")
@@ -113,11 +115,11 @@ class BaseClient(object):
             return func(*args, **kwargs)
         except SocketError as e:
             LOGGER.info("re-logging in due to LOGIN_TIMEOUT gone")
-            self.login(self._login_data[0], self._login_data[1], self._login_data[2])
+            self.login()
             return func(*args, **kwargs)
         except Exception as e:
             LOGGER.warning(e)
-            self.login(self._login_data[0], self._login_data[1], self._login_data[2])
+            self.login()
             return func(*args, **kwargs)
 
     def _send_command(self, dict_data):
@@ -144,16 +146,16 @@ class BaseClient(object):
         """with check login"""
         return self._login_decorator(self._send_command, dict_data)
 
-    def login(self, user_id, password, mode='demo'):
+    def login(self):
         """login command"""
-        data = _get_data("login", userId=user_id, password=password)
+        data = _get_data("login", userId=self._login_data[0], password=self._login_data[1])
         try:
-            self.ws = create_connection(f"wss://ws.xtb.com/{mode}")
+            self.ws = create_connection(f"wss://ws.xtb.com/{self._login_data[2]}")
         except WebSocketAddressException:
             self.LOGGER.error("not connected - WebSocketAddressException caught")
             raise NoInternetConnection()
         response = self._send_command(data)
-        self._login_data = (user_id, password, mode)
+
         self.status = STATUS.LOGGED
         self.LOGGER.info("CMD: login...")
         return response
@@ -376,8 +378,8 @@ class Transaction(object):
 
 class Client(BaseClient):
     """advanced class of client"""
-    def __init__(self):
-        super().__init__()
+    def __init__(self, uname, pwd, mode):
+        super().__init__(uname, pwd, mode)
         self.trade_rec = {}
         self.LOGGER = logging.getLogger('XTBApi.api.Client')
         self.LOGGER.info("Client inited")
