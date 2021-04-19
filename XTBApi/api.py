@@ -98,7 +98,7 @@ def _check_volume(volume):
 class BaseClient(object):
     """main client class"""
 
-    def __init__(self, uname, pwd, mode):
+    def __init__(self, uname, pwd, mode, lg = True):
         self.ws = None
         self._login_data = None
         self._login_data = (uname, pwd, mode)
@@ -106,7 +106,9 @@ class BaseClient(object):
         self._time_last_request = time.time() - MAX_TIME_INTERVAL
         self.status = STATUS.NOT_LOGGED
         LOGGER.debug("BaseClient inited")
+        LOGGER.propagate = lg
         self.LOGGER = logging.getLogger('XTBApi.api.BaseClient')
+        self.LOGGER.propagate = lg
 
     def _login_decorator(self, func, *args, **kwargs):
         if self.status == STATUS.NOT_LOGGED:
@@ -378,11 +380,12 @@ class Transaction(object):
 
 class Client(BaseClient):
     """advanced class of client"""
-    def __init__(self, uname, pwd, mode):
-        super().__init__(uname, pwd, mode)
+    def __init__(self, uname, pwd, mode, lg = True):
+        super().__init__(uname, pwd, mode,lg)
         self.trade_rec = {}
         self.LOGGER = logging.getLogger('XTBApi.api.Client')
         self.LOGGER.info("Client inited")
+        self.LOGGER.propagate = lg
 
     def check_if_market_open(self, list_of_symbols):
         """check if market is open for symbol in symbols"""
